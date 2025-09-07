@@ -1,0 +1,76 @@
+---
+- name: Install and configure Apache HTTPD with SSL and a test webpage
+  hosts: webservers
+  become: yes
+
+  tasks:
+    - name: Install httpd and mod_ssl
+      yum:
+        name:
+          - httpd
+          - mod_ssl
+          - openssl
+        state: present
+
+    - name: Ensure httpd is started and enabled
+      service:
+        name: httpd
+        state: started
+        enabled: yes
+
+    - name: Create a test index.html page
+      copy:
+        dest: /var/www/html/index.html
+        content: |
+          <!DOCTYPE html>
+          <html>
+          <head>
+              <title>Welcome to Apache with SSL</title>
+          </head>
+          <body>
+              <h1>Hello from Ansible!</h1>
+              <p>This page is served over HTTPS.</p>
+          </body>
+          </html>
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Generate self-signed SSL certificate
+      command: >
+        openssl req -new -x509 -days 365 -nodes
+        -out /etc/pki/tls/certs/localhost.crt
+        -keyout /etc/pki/tls/private/localhost.key
+        -subj "/C=US/ST=Amazon/L=Cloud/O=Ansible/CN=localhost"
+      args:
+        creates: /etc/pki/tls/certs/localhost.crt
+
+    - name: Ensure SSL configuration is enabled
+      lineinfile:
+        path: /etc/httpd/conf.d/ssl.conf
+        regexp: '^SSLCertificateFile'
+        line: 'SSLCertificateFile /etc/pki/tls/certs/localhost.crt'
+        state: present
+
+    - name: Ensure SSL key configuration is enabled
+      lineinfile:
+        path: /etc/httpd/conf.d/ssl.conf
+        regexp: '^SSLCertificateKeyFile'
+        line: 'SSLCertificateKeyFile /etc/pki/tls/private/localhost.key'
+        state: present
+
+    - name: Restart Apache to apply SSL configuration
+      service:
+        name: httpd
+        state: restarted
+
+    - name: Wait for HTTPS service to respond
+      uri:
+        url: https://{{ inventory_hostname }}
+        validate_certs: no
+        status_code: 200
+      register: ssl_response
+
+    - name: Show SSL page content
+      debug:
+        var: ssl_response.content
